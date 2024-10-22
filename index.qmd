@@ -1,0 +1,133 @@
+---
+title: "Modelling  Ebola Virus Disease"
+format: dashboard
+theme: morph
+---
+
+```{r}
+# Load packages 
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, outbreaks, bslib, bsicons, shiny, 
+                plotly, htmltools, reactable, flexdashboard, gapminder, here,janitor,sf,gganimate, countrycode, scales, RColorBrewer, viridis, ggpmisc, deSolve,
+ggplot2, reshape2, MASS, rgeoboundaries, rnaturalearth)
+
+```
+```{r}
+# 1. Define the SEIR model
+SEIRQD_model <- function(t, y, parms) {
+  with(as.list(c(y, parms)), {
+    dS <- -beta * S * (I + Is)
+    dE <- beta * S * (I + Is) - sigma * E - delta * E
+    dI <- sigma * E - gamma * I - mu * I - epsilon * I
+    dQ <- delta * E - sigma_q * Q
+    dIs <- epsilon * I - gamma_i * Is - mu_i * Is
+    dR <- gamma * I + gamma_i * Is
+    dD <- mu * I + mu_i * Is
+    return(list(c(dS, dE, dI, dQ, dIs, dR, dD)))
+  })
+}
+# 2. Set parameter values as a named list
+params <- list(
+  beta = 0.5, # Transmission rate
+  sigma = 1/5, # Rate of progression from exposed to infectious (incubation period ~5 days)
+  gamma = 1/10, # Recovery rate for infectious (infectious period ~10 days)
+  gamma_i = 1/10, # Recovery rate for isolated
+  mu = 0.05, # Mortality rate for infectious
+  mu_i = 0.03, # Mortality rate for isolated
+  delta = 0.1, # Quarantine rate
+  epsilon = 0.1, # Isolation rate
+  sigma_q = 1/10 # Rate at which quarantined become infectious if quarantine fails
+)
+```
+
+# Page 1
+
+
+```{r}
+# 3. Initial state
+initial_state <- c(
+  S = 0.99, E = 0.01, I = 0, Q = 0, Is = 0, R = 0, D = 0
+)
+# 4. Time frame
+time <- seq(0, 100, by = 1)
+# 5. Solve the model
+output <- deSolve::ode(
+  y = initial_state,
+  times = time,
+  func = SEIRQD_model,
+  parms = params
+)
+output_df <- as.data.frame(output)
+# 6. Create data for ggplot2 by reshaping
+output_long <- reshape2::melt(output_df, id.vars = "time")
+# 7. Plot results
+library(ggplot2)
+ggplot(output_long, aes(x = time, y = value, color = variable)) +
+  geom_line() +
+  labs(
+    title = "SEIRQD Model with Quarantine and Isolation for Ebola Virus Disease",
+    x = "Time (days)",
+    y = "Proportion of Population"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2")
+```
+
+# Page 2
+
+```{r}
+#What happens if we increase the quarantine rates?
+# Define a function to run the SEIRQD model with varying quarantine rates
+run_seirqd <- function(delta) {
+  # Define parameters
+  params <- list(
+    beta = 0.5, # Transmission rate
+    sigma = 1/5, # Rate of progression from exposed to infectious (incubation period ~5 days)
+    gamma = 1/10, # Recovery rate for infectious (infectious period ~10 days)
+    gamma_i = 1/10, # Recovery rate for isolated
+    mu = 0.05, # Mortality rate for infectious
+    mu_i = 0.03, # Mortality rate for isolated
+    delta = delta, # Quarantine rate
+    epsilon = 0.1, # Constant isolation rate
+    sigma_q = 1/10 # Rate at which quarantined become infectious if quarantine fails
+  )
+  # Initial state
+  initial_state <- c(S = 0.99, E = 0.01, I = 0, Q = 0, Is = 0, R = 0, D = 0)
+  # Time frame
+  time <- seq(0, 100, by = 1)
+  # Solve the model
+  output <- ode(y = initial_state, times = time, func = SEIRQD_model, parms = params)
+  # Convert output to data frame
+  output_df <- as.data.frame(output)
+  output_df$delta <- delta
+  
+  return(output_df)
+}
+```
+
+
+```{r}
+# Define a range of quarantine rates to test
+delta_values <- c(0.05, 0.1, 0.2, 0.4, 0.6, 0.8) # Different quarantine rates
+# Run the model for each quarantine rate
+results <- lapply(delta_values, run_seirqd)
+# Combine all results into a single data frame
+results_df <- do.call(rbind, results)
+# Reshape data for plotting
+results_long <- melt(results_df, id.vars = c("time", "delta"))
+# Plot the results focusing on the infectious population
+ggplot(subset(results_long, variable == "I"), aes(x = time, y = value, color = factor(delta))) +
+  geom_line() +
+  labs(title = "Effect of Quarantine Rates on Infectious Population",
+       x = "Time (days)",
+       y = "Proportion Infectious (I)",
+       color = "Quarantine Rate (delta)") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+```
+
+
+```
+
+
